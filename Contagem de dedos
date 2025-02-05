@@ -1,0 +1,86 @@
+import cv2
+import mediapipe as mp
+
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+mp_draw = mp.solutions.drawing_utils
+
+cap = cv2.VideoCapture(0)
+
+def count_fingers(hand_landmarks, is_left_hand):
+    fingers = [
+        (8, 6),  # Indicador
+        (12, 10), # Médio
+        (16, 14), # Anelar
+        (20, 18)  # Mínimo
+    ]
+    
+    count = 0
+
+    # Contando os dedos indicador, médio, anelar e mínimo
+    for p1, p2 in fingers:
+        if hand_landmarks.landmark[p1].y < hand_landmarks.landmark[p2].y:
+            count += 1
+    
+    # Polegar (verifica se a ponta do polegar está acima da base, levando em conta a orientação)
+    if is_left_hand:
+        # Para a mão esquerda, o polegar precisa estar à esquerda (menor valor de x)
+        if hand_landmarks.landmark[4].x > hand_landmarks.landmark[3].x:
+            count += 1
+    else:
+        # Para a mão direita, o polegar precisa estar à direita (maior valor de x)
+        if hand_landmarks.landmark[4].x < hand_landmarks.landmark[3].x:
+            count += 1
+
+    return count
+
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        break
+    
+    frame = cv2.flip(frame, 1)  # Espelha a imagem horizontalmente
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = hands.process(rgb_frame)
+    
+    total_fingers = 0  # Variável para somar os dedos das duas mãos
+
+    if results.multi_hand_landmarks:
+        for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+            # Identificando qual mão é esquerda ou direita
+            is_left_hand = handedness.classification[0].label == "Left"
+            
+            # Desenhando as landmarks das mãos
+            mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            
+            # Desenhando um retângulo ao redor da mão para feedback visual
+            x_min = min([lm.x for lm in hand_landmarks.landmark])
+            x_max = max([lm.x for lm in hand_landmarks.landmark])
+            y_min = min([lm.y for lm in hand_landmarks.landmark])
+            y_max = max([lm.y for lm in hand_landmarks.landmark])
+            h, w, _ = frame.shape
+            # Desenhando um retângulo nas coordenadas normalizadas
+            cv2.rectangle(frame, 
+                          (int(x_min * w), int(y_min * h)), 
+                          (int(x_max * w), int(y_max * h)), 
+                          (255, 0, 0), 2)  # Retângulo azul para destacar
+
+            # Contando os dedos da mão
+            fingers_count = count_fingers(hand_landmarks, is_left_hand)
+            
+            # Somando os dedos das mãos
+            total_fingers += fingers_count
+    
+    # Calculando a posição do texto dinamicamente para evitar sobreposição
+    h, w, _ = frame.shape
+    text_size = cv2.getTextSize(str(total_fingers), cv2.FONT_HERSHEY_SIMPLEX, 2, 3)[0]
+    text_x = w - text_size[0] - 50  # Posição à direita
+    text_y = 100  # Manter a posição no topo
+    cv2.putText(frame, str(total_fingers), (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 3)
+    
+    cv2.imshow("Hand Number Recognition", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
